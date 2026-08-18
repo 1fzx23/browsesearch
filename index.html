@@ -80,7 +80,7 @@
 <header class="nav"><div class="wrap nav-inner">
   <div class="brand"><span class="dot"></span> browsesearch <small>/ 真实浏览器搜索</small></div>
   <nav class="nav-links">
-    <a href="#why">原理</a><a href="#try">试一试</a><a href="#how">用法</a><a href="#engines">引擎</a>
+    <a href="#why">原理</a><a href="#try">试一试</a><a href="#how">用法</a><a href="#rank">排序</a><a href="#ai">AI 调用</a><a href="#engines">引擎</a>
     <a href="https://github.com/1fzx23/browsesearch" target="_blank" rel="noopener">GitHub ↗</a>
   </nav>
 </div></header>
@@ -128,8 +128,48 @@
     <div class="steps">
       <div class="step"><div class="n"></div><div><h4>安装</h4><p><code>pip install "browsesearch[browser]"</code> 装真实浏览器模式（会顺带下载 Chromium）；只想用 HTTP 回退就 <code>pip install browsesearch</code>。</p></div></div>
       <div class="step"><div class="n"></div><div><h4>搜索</h4><p><code>python browsesearch.py "关键词"</code> 默认 DuckDuckGo + 真实浏览器。换引擎：<code>-e bing</code> / <code>-e google</code>。</p></div></div>
-      <div class="step"><div class="n"></div><div><h4>格式化输出</h4><p><code>-f json</code> 拿结构化结果，<code>-f md</code> 拿 Markdown，方便接进脚本或笔记。</p></div></div>
+      <div class="step"><div class="n"></div><div><h4>格式化输出</h4><p><code>-f json</code> 拿结构化结果（含 <code>rank</code> / <code>score</code>），<code>-f md</code> 拿 Markdown，方便接进脚本或笔记。</p></div></div>
+      <div class="step"><div class="n"></div><div><h4>相关度排序与 Top</h4><p>默认按匹配度降序排列，每条带 <code>score</code>。用 <code>--top 3</code> 只取最匹配的前 3 条；<code>--sort engine</code> 可恢复搜索引擎原始顺序。默认一次抓满 30 条（跨页去重）。</p></div></div>
       <div class="step"><div class="n"></div><div><h4>打开结果</h4><p>加 <code>--open</code> 用系统默认浏览器直接打开第一条结果；<code>--no-headless</code> 让浏览器以窗口形式出现。</p></div></div>
+      <div class="step"><div class="n"></div><div><h4>启动 AI 调用接口</h4><p><code>--serve --port 8731</code> 起一个零依赖本地 HTTP API，让 AI / 脚本直接调 <code>/search</code> 读 JSON（见下方「AI 调用」）。</p></div></div>
+    </div>
+  </section>
+
+  <section id="rank">
+    <div class="sec-head"><h2>相关度排序 · 找最匹配的那条</h2><span class="hint">// relevance</span></div>
+    <div class="cards">
+      <div class="card"><div class="ic">🎯</div><h3>自动打分</h3><p>对每条结果的标题与摘要，按查询词命中情况算一个 <code>score</code>：整句命中标题 +5、单词命中标题 +2、命中摘要 +0.5、覆盖率再加权。</p></div>
+      <div class="card"><div class="ic">📊</div><h3>降序排列</h3><p>返回结果默认按 score 从高到低，第一条就是最匹配；JSON 里会带 <code>rank</code> 与 <code>score</code>，一眼看出谁最相关。</p></div>
+      <div class="card"><div class="ic">🔝</div><h3>Top N</h3><p>只要最相关的几条？<code>--top 5</code> 直接返回按相关度排好的前 5 条，省去自己再筛。</p></div>
+      <div class="card"><div class="ic">📚</div><h3>至少 30 条</h3><p>默认一次抓满 30 条（多页翻页去重），「所有结果」的标题一网打尽，再统一按相关度排序。</p></div>
+    </div>
+  </section>
+
+  <section id="ai">
+    <div class="sec-head"><h2>让 AI 直接调用</h2><span class="hint">// HTTP API</span></div>
+    <div class="demo">
+      <p class="note">browsesearch 内置一个<strong>零依赖</strong>的本地 HTTP API。启动后，任何 AI / 脚本都能用 HTTP 调 <code>/search</code> 并读取结构化 JSON 返回值——这正是「让 AI 运行并读取返回值」的入口。</p>
+      <pre># 1) 启动服务（阻塞，Ctrl+C 退出）
+python browsesearch.py --serve --port 8731
+
+# 2) AI / 脚本调用
+curl "http://127.0.0.1:8731/search?q=python%20%E5%BC%82%E6%AD%A5%E7%BC%96%E7%A8%8B&limit=30&top=3"
+
+# 或用 POST
+curl -X POST http://127.0.0.1:8731/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"python 异步编程","limit":30,"top":3}'</pre>
+      <p class="note">返回结构（节选）：</p>
+      <pre>{
+  "query": "python 异步编程",
+  "engine": "duckduckgo",
+  "count": 3,
+  "top_match": { "rank":1, "score":8.2, "title":"...", "url":"...", "snippet":"..." },
+  "results": [
+    { "rank":1, "score":8.2, "title":"...", "url":"...", "snippet":"..." },
+    { "rank":2, "score":6.0, "title":"...", "url":"...", "snippet":"..." }
+  ]
+}</pre>
     </div>
   </section>
 
