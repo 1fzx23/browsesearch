@@ -13,10 +13,12 @@ browsesearch 的测试。
     python -m pytest tests/                  # 用 pytest 跑
 """
 
+import json as _json
 import os
 import sys
 import threading
 import urllib.parse
+import urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 # 让 import browsesearch 能找到仓库根目录的模块
@@ -125,6 +127,77 @@ def test_browser_pipeline_google():
         assert len(results) == 3
         assert results[0]["url"] == "https://example.com/grpc-intro"
     finally:
+        httpd.shutdown()
+
+
+def test_relevance_top_match():
+    """相关度排序：最匹配查询的结果应排第一，且 score 更高。"""
+    results = [
+        {"title": "完全无关的话题", "url": "u1", "snippet": "和 Python 没关系"},
+        {"title": "Python 异步编程入门", "url": "u2", "snippet": "讲解 asyncio 异步编程"},
+    ]
+    ordered = bs.rank_results(results, "python 异步编程", sort="relevance")
+    assert ordered[0]["url"] == "u2"
+    assert ordered[0]["score"] > ordered[1]["score"]
+    # 每条都应带 score / rank
+    assert all("score" in r and "rank" in r for r in ordered)
+
+
+def test_parse_many_ddg():
+    """30+ 条 fixture：能解析出至少 30 条，且标题齐全不重复。"""
+    root = bs.parse_html(_fixture("duckduckgo_many.html"))
+    results = bs.parse_ddg(root)
+    assert len(results) >= 30, f"只解析出 {len(results)} 条，需 ≥30"
+    titles = [r["title"] for r in results]
+    assert all(titles), "存在空标题"
+    assert len(set(titles)) == len(titles), "标题有重复"
+    assert all(r["url"].startswith("http") for r in results)
+
+
+def test_relevance_on_many_fixture():
+    """在 40 条 fixture 上按相关度排序，最匹配的应排在最前。"""
+    root = bs.parse_html(_fixture("duckduckgo_many.html"))
+    results = bs.parse_ddg(root)
+    ordered = bs.rank_results(results, "python 异步编程", sort="relevance")
+    assert ordered[0]["title"].startswith("Python 异步编程")
+    assert ordered[0]["rank"] == 1
+
+
+def test_http_server():
+    """本地 HTTP API：GET/POST /search 返回结构化 JSON（含 rank/score）。"""
+    fake = [
+        {"title": "Python 异步编程指南", "url": "https://x.com/1", "snippet": "asyncio", "score": 8.0, "rank": 1},
+        {"title": "无关结果", "url": "https://x.com/2", "snippet": "随便", "score": 0.0, "rank": 2},
+    ]
+    orig = bs.search
+    bs.search = lambda *a, **k: fake  # 避免真实联网
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), bs._APIHandler)
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        # GET
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/search?q=python&limit=10"
+        ) as r:
+            data = _json.loads(r.read())
+        assert data["count"] == 2
+        assert data["query"] == "python"
+        assert data["top_match"]["url"] == "https://x.com/1"
+        assert "rank" in data["results"][0] and "score" in data["results"][0]
+
+        # POST
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/search",
+            data=_json.dumps({"query": "python", "limit": 5}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as r:
+            data2 = _json.loads(r.read())
+        assert data2["count"] == 2
+    finally:
+        bs.search = orig
         httpd.shutdown()
 
 
