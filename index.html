@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>browsesearch · 真正从浏览器里联网搜索</title>
+<style>
+  :root{
+    --bg:#0b0e14; --bg-soft:#11151f; --bg-card:#151b27; --border:#232b3a; --border-soft:#1b2230;
+    --text:#e6edf3; --text-dim:#9aa7b8; --text-faint:#66748a;
+    --accent:#5eead4; --accent-2:#7dd3fc; --orange:#fb923c; --red:#f472b6; --green:#4ade80;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:
+      radial-gradient(900px 400px at 80% -10%,rgba(94,234,212,.08),transparent 60%),
+      radial-gradient(700px 360px at 0% 0%,rgba(125,211,252,.07),transparent 55%),var(--bg);
+    color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:980px;margin:0 auto;padding:0 24px}
+  .nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(10px);background:rgba(11,14,20,.72);border-bottom:1px solid var(--border-soft)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:58px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700}
+  .brand .dot{width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 0 14px rgba(94,234,212,.6)}
+  .brand small{color:var(--text-faint);font-weight:500;font-family:var(--mono)}
+  .nav-links{display:flex;gap:20px;font-size:14px;color:var(--text-dim)}
+  .nav-links a:hover{color:var(--accent)}
+
+  .hero{padding:84px 0 54px;text-align:center}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--accent);border:1px solid var(--border);background:var(--bg-soft);padding:6px 14px;border-radius:999px;margin-bottom:22px;font-family:var(--mono)}
+  .hero h1{font-size:clamp(34px,6vw,56px);margin:0 0 14px;font-weight:800;letter-spacing:-1px;
+    background:linear-gradient(120deg,#fff 20%,var(--accent) 60%,var(--accent-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .hero p.sub{color:var(--text-dim);font-size:18px;max-width:660px;margin:0 auto 28px}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{font-size:14px;font-weight:600;padding:10px 18px;border-radius:10px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text);transition:.15s;cursor:pointer}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:linear-gradient(135deg,rgba(94,234,212,.18),rgba(125,211,252,.18));border-color:rgba(94,234,212,.4)}
+  .btn.primary:hover{color:#fff}
+
+  section{padding:42px 0}
+  .sec-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px}
+  .sec-head h2{font-size:23px;margin:0;font-weight:700}
+  .sec-head .hint{color:var(--text-faint);font-size:13px;font-family:var(--mono)}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+  .card{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:20px;transition:.18s}
+  .card:hover{transform:translateY(-3px);border-color:#2f3b50;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+  .card .ic{font-size:26px}
+  .card h3{margin:10px 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--text-dim);font-size:13.5px}
+
+  .demo{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:24px}
+  .demo .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .demo input,.demo select{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:11px 13px;border-radius:10px;font-size:14px;font-family:var(--mono)}
+  .demo .note{color:var(--text-faint);font-size:13px;margin-top:8px}
+  .demo pre{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;overflow:auto;font-family:var(--mono);font-size:13px;color:var(--text-dim);margin:10px 0 0}
+
+  .steps{counter-reset:s;display:grid;gap:14px}
+  .step{display:flex;gap:14px;background:var(--bg-soft);border:1px solid var(--border-soft);border-radius:14px;padding:16px 20px}
+  .step .n{counter-increment:s;flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-weight:700;background:var(--accent);color:var(--bg)}
+  .step .n::before{content:counter(s)}
+  .step h4{margin:0 0 4px;font-size:15px}
+  .step p{margin:0;color:var(--text-faint);font-size:13.5px}
+  code{font-family:var(--mono);background:var(--bg);border:1px solid var(--border);padding:1px 6px;border-radius:6px;color:var(--accent-2);font-size:13px}
+
+  .eng{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+  .eng .e{background:var(--bg-soft);border:1px solid var(--border-soft);border-radius:14px;padding:16px}
+  .eng .e h4{margin:0 0 6px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .eng .e p{margin:0;color:var(--text-faint);font-size:13px}
+  .tag{font-size:11px;color:var(--text-dim);border:1px solid var(--border);padding:3px 9px;border-radius:999px;font-family:var(--mono)}
+
+  footer{border-top:1px solid var(--border-soft);padding:30px 0 50px;color:var(--text-faint);font-size:13px;text-align:center}
+  footer a{color:var(--accent)}
+  @media(max-width:640px){.nav-links{display:none}}
+</style>
+</head>
+<body>
+<header class="nav"><div class="wrap nav-inner">
+  <div class="brand"><span class="dot"></span> browsesearch <small>/ 真实浏览器搜索</small></div>
+  <nav class="nav-links">
+    <a href="#why">原理</a><a href="#try">试一试</a><a href="#how">用法</a><a href="#engines">引擎</a>
+    <a href="https://github.com/1fzx23/browsesearch" target="_blank" rel="noopener">GitHub ↗</a>
+  </nav>
+</div></header>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="badge">🔎 工具箱第 4 个 · 难度 L4（专家）</div>
+    <h1>真正从浏览器里联网搜索</h1>
+    <p class="sub">browsesearch 不是调某个搜索 API，而是直接驱动一个真实的 Chromium 无头浏览器去打开搜索引擎、等 JS 把结果渲染出来，再读取 DOM。没有 API key，不被轻易反爬挡掉。</p>
+    <div class="cta">
+      <a class="btn primary" href="#try">在浏览器里试搜 ↗</a>
+      <a class="btn" href="https://github.com/1fzx23/browsesearch" target="_blank" rel="noopener">查看源码</a>
+    </div>
+  </div>
+
+  <section id="why">
+    <div class="sec-head"><h2>为什么是「真实浏览器」？</h2><span class="hint">// how it works</span></div>
+    <div class="cards">
+      <div class="card"><div class="ic">🌐</div><h3>真实渲染</h3><p>用 Playwright 驱动 Chromium 打开搜索页，JavaScript 完整执行，结果 DOM 才是真实可见的那份。</p></div>
+      <div class="card"><div class="ic">🛡️</div><h3>绕过反爬</h3><p>带真实桌面 UA 与视口，比裸脚本/HTTP 请求更难被搜索引擎的人机校验拦下，Google 尤其明显。</p></div>
+      <div class="card"><div class="ic">🔑</div><h3>零 Key</h3><p>不依赖任何搜索服务商 API key，不配额、不限速（遵守 robots 与礼貌爬取的前提下）。</p></div>
+      <div class="card"><div class="ic">♻️</div><h3>自动回退</h3><p>没装 Playwright？自动回退到纯标准库 HTTP 模式，照样能搜，只是少了 JS 渲染兜底。</p></div>
+    </div>
+  </section>
+
+  <section id="try">
+    <div class="sec-head"><h2>在真实浏览器里试搜</h2><span class="hint">// live, opens your browser</span></div>
+    <div class="demo">
+      <div class="row">
+        <input id="q" type="text" placeholder="输入搜索词，例如：python 异步编程" value="python 异步编程" />
+        <select id="eng">
+          <option value="duckduckgo">DuckDuckGo</option>
+          <option value="bing">Bing</option>
+          <option value="google">Google</option>
+        </select>
+        <button class="btn primary" id="go">用浏览器打开搜索 ↗</button>
+      </div>
+      <p class="note">点击后会用你系统里真实的默认浏览器打开对应的搜索结果页——这正是 browsesearch 干的事，只不过命令行版会把结果读回来。</p>
+      <pre id="cmd">python browsesearch.py "python 异步编程" -e duckduckgo</pre>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="sec-head"><h2>命令行用法</h2><span class="hint">// CLI</span></div>
+    <div class="steps">
+      <div class="step"><div class="n"></div><div><h4>安装</h4><p><code>pip install "browsesearch[browser]"</code> 装真实浏览器模式（会顺带下载 Chromium）；只想用 HTTP 回退就 <code>pip install browsesearch</code>。</p></div></div>
+      <div class="step"><div class="n"></div><div><h4>搜索</h4><p><code>python browsesearch.py "关键词"</code> 默认 DuckDuckGo + 真实浏览器。换引擎：<code>-e bing</code> / <code>-e google</code>。</p></div></div>
+      <div class="step"><div class="n"></div><div><h4>格式化输出</h4><p><code>-f json</code> 拿结构化结果，<code>-f md</code> 拿 Markdown，方便接进脚本或笔记。</p></div></div>
+      <div class="step"><div class="n"></div><div><h4>打开结果</h4><p>加 <code>--open</code> 用系统默认浏览器直接打开第一条结果；<code>--no-headless</code> 让浏览器以窗口形式出现。</p></div></div>
+    </div>
+  </section>
+
+  <section id="engines">
+    <div class="sec-head"><h2>支持的搜索引擎</h2><span class="hint">// 3 engines</span></div>
+    <div class="eng">
+      <div class="e"><h4>🔦 DuckDuckGo <span class="tag">默认</span></h4><p>HTML 版服务端渲染，对无头浏览器最友好，几乎不需要 JS 兜底。</p></div>
+      <div class="e"><h4>🅱️ Bing</h4><p>结果结构清晰，真实浏览器渲染能稳定拿到标题/链接/摘要。</p></div>
+      <div class="e"><h4>🔍 Google</h4><p>反爬最严，真实 Chromium 渲染的加成最大；DOM 结构偶尔变动，解析为尽力而为。</p></div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  browsesearch · 由 WorkBuddy 自动打造 · <a href="https://github.com/1fzx23/browsesearch" target="_blank" rel="noopener">github.com/1fzx23/browsesearch</a>
+</footer>
+
+<script>
+  const ENG = {
+    duckduckgo: q => "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q),
+    bing:       q => "https://www.bing.com/search?q=" + encodeURIComponent(q),
+    google:     q => "https://www.google.com/search?q=" + encodeURIComponent(q) + "&hl=zh-CN"
+  };
+  const q = document.getElementById("q");
+  const eng = document.getElementById("eng");
+  const cmd = document.getElementById("cmd");
+  function sync(){
+    const s = q.value.trim() || "关键词";
+    cmd.textContent = 'python browsesearch.py "' + s + '" -e ' + eng.value;
+  }
+  q.addEventListener("input", sync);
+  eng.addEventListener("change", sync);
+  sync();
+  document.getElementById("go").addEventListener("click", () => {
+    const query = q.value.trim();
+    if(!query) return;
+    window.open(ENG[eng.value](query), "_blank", "noopener");
+  });
+</script>
+</body>
+</html>
