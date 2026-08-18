@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browsesearch"
+version = "1.0.0"
+description = "真正从浏览器里联网搜索：默认驱动真实 Chromium 渲染搜索引擎结果并抽取标题/链接/摘要。"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+authors = [{ name = "1fzx23" }]
+keywords = ["search", "web", "browser", "playwright", "scraper", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Topic :: Internet :: WWW/HTTP",
+]
+
+# 核心只用标准库；真实浏览器模式是可选依赖
+dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright>=1.40"]
+
+[project.scripts]
+browsesearch = "browsesearch:main"
+
+[tool.setuptools]
+py_modules = ["browsesearch"]
