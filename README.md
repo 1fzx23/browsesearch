@@ -35,19 +35,25 @@ pip install browsesearch
 ## 命令行用法
 
 ```bash
-# 默认 DuckDuckGo + 真实浏览器（自动）
+# 默认 DuckDuckGo + 真实浏览器（自动），一次抓满 30 条并按匹配度排序
 python browsesearch.py "python 异步编程"
 
 # 指定引擎
 python browsesearch.py "最佳机械键盘" -e bing
 python browsesearch.py "rust vs go"   -e google
 
-# 输出为 JSON / Markdown
+# 输出为 JSON / Markdown（JSON 含 rank / score）
 python browsesearch.py "gRPC 教程" -f json
 python browsesearch.py "gRPC 教程" -f md
 
-# 限制条数
-python browsesearch.py "天气" -n 5
+# 只取最匹配的前 3 条
+python browsesearch.py "python 异步编程" --top 3
+
+# 恢复搜索引擎原始顺序
+python browsesearch.py "天气" --sort engine
+
+# 不限制条数，尽量多抓（最多翻 MAX_PAGES 页）
+python browsesearch.py "天气" --all
 
 # 强制纯 HTTP 模式（不需要浏览器）
 python browsesearch.py "新闻" --mode http
@@ -57,6 +63,9 @@ python browsesearch.py "天气" --open
 
 # 让浏览器以窗口形式出现（非无头）
 python browsesearch.py "python" --no-headless
+
+# 启动本地 HTTP API（让 AI 直接调用，见下）
+python browsesearch.py --serve --port 8731
 
 # 查看支持的引擎
 python browsesearch.py --list-engines
@@ -68,12 +77,79 @@ python browsesearch.py --list-engines
 | --- | --- |
 | `query` | 搜索关键词（位置参数） |
 | `-e, --engine` | `duckduckgo`(默认) / `bing` / `google` |
-| `-n, --limit` | 返回条数，默认 10 |
+| `-n, --limit` | 想要的结果条数，**默认 30**（会跨页翻页去重凑够） |
 | `-f, --format` | `text`(默认) / `json` / `md` |
 | `--mode` | `auto`(默认) / `browser`(真实浏览器) / `http`(纯标准库) |
+| `--sort` | `relevance`(按匹配度降序，默认) / `engine`(原始顺序) |
+| `--top N` | 只返回最匹配的前 N 条（按相关度，无视 --sort） |
+| `--all` | 不限制条数，尽量多抓（最多翻 MAX_PAGES 页） |
 | `--no-headless` | 浏览器显示窗口 |
 | `--open` | 用系统默认浏览器打开结果 |
+| `--serve` | 启动本地 HTTP API 服务（AI 调用入口） |
+| `--port` / `--host` | serve 模式的端口 / 监听地址（默认 8731 / 127.0.0.1） |
 | `--list-engines` | 列出引擎后退出 |
+
+---
+
+## 相关度排序 · 找最匹配的那条
+
+browsesearch 会为每条结果算一个 **匹配度分数 `score`** 并按其降序排列：
+
+- 整句查询命中标题：**+5**；命中摘要：+1
+- 每个查询词命中标题：**+2**；命中摘要：+0.5
+- 查询词覆盖率（命中词数 / 总词数）额外加权；有摘要再 +0.1
+
+默认行为：一次抓满 **30 条**（多页翻页、URL 去重），然后统一按相关度排序。
+用 `--top 3` 直接取最匹配的前 3 条；`--sort engine` 则保持搜索引擎原始顺序。
+JSON 输出里每条都带 `rank`（名次）与 `score`（分数），最匹配的就是第 1 条。
+
+---
+
+## 让 AI 调用（本地 HTTP API）
+
+browsesearch 内置一个 **零依赖**（纯标准库 `http.server`）的本地 HTTP API。
+启动后，任何 AI / 脚本都能用 HTTP 调 `/search` 并读取结构化 JSON 返回值——这就是「让 AI 运行并读取返回值」的入口。
+
+```bash
+# 1) 启动服务（阻塞运行，Ctrl+C 退出）
+python browsesearch.py --serve --port 8731
+
+# 2) AI / 脚本调用（GET）
+curl "http://127.0.0.1:8731/search?q=python%20%E5%BC%82%E6%AD%A5%E7%BC%96%E7%A8%8B&limit=30&top=3"
+
+# 或 POST
+curl -X POST http://127.0.0.1:8731/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"python 异步编程","limit":30,"top":3}'
+```
+
+### 接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/health` | 健康检查，返回 `{status, service, version, engines}` |
+| GET | `/search?q=&engine=&limit=&sort=&top=&mode=&headless=` | 查询参数版搜索 |
+| POST | `/search` | Body 为 JSON：`{query, engine, limit, sort, top, mode, headless}` |
+| OPTIONS | `/search` | 预检（已开 CORS `Access-Control-Allow-Origin: *`） |
+
+返回结构：
+
+```jsonc
+{
+  "query": "python 异步编程",
+  "engine": "duckduckgo",
+  "sort": "relevance",
+  "count": 3,
+  "top_match": { "rank": 1, "score": 8.2, "title": "...", "url": "...", "snippet": "..." },
+  "results": [
+    { "rank": 1, "score": 8.2, "title": "...", "url": "...", "snippet": "..." },
+    { "rank": 2, "score": 6.0, "title": "...", "url": "...", "snippet": "..." }
+  ]
+}
+```
+
+AI 读取时，直接取 `top_match` 即可得到「最匹配的一条」，或遍历 `results`
+拿到「所有结果的标题（title）/ 链接（url）/ 分数（score）」。
 
 ---
 
@@ -82,14 +158,18 @@ python browsesearch.py --list-engines
 ```python
 from browsesearch import search
 
-results = search("python", engine="duckduckgo", limit=5)
+results = search("python", engine="duckduckgo", limit=30)
 for r in results:
-    print(r["title"])
+    print(r["rank"], r["score"], r["title"])
     print(r["url"])
     print(r["snippet"])
+
+# 只要最匹配的前 3 条
+top3 = search("python 异步编程", limit=30, top=3)
 ```
 
-`search()` 返回的每个元素是 `{"title": str, "url": str, "snippet": str}`。
+`search()` 返回的每个元素是
+`{"title": str, "url": str, "snippet": str, "score": float, "rank": int}`。
 
 ---
 
