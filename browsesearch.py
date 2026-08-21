@@ -59,7 +59,7 @@ import webbrowser
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-__version__ = "1.1.0"
+__version__ = "1.1.3"
 
 # 一个尽量「像真人桌面浏览器」的 UA，避免被搜索引擎当成裸脚本直接挡掉。
 BROWSER_UA = (
@@ -187,37 +187,47 @@ def relevance_score(query: str, result: dict) -> float:
     给单条结果算一个「和查询的匹配度分数」。
 
     规则（朴素但够用，纯标准库无依赖）：
-      - 整句查询命中标题：+5；命中摘要：+1
-      - 每个查询词命中标题：+2；命中摘要：+0.5
-      - 查询词覆盖率（命中词数 / 总词数）：+1 * 覆盖率
-      - 有摘要（信息更完整）：+0.1
+      - 整句查询命中：标题按出现次数 ×6、摘要 ×2
+      - 每个查询词命中：标题 ×3/次、摘要 ×0.6/次（用词频而非布尔，可区分「天气」出现多次的摘要）
+      - 查询词出现在 URL（域名/路径含关键词，强信号）：每个词 +1.5
+      - 覆盖率（命中词数 / 总词数）：×2
+      - 引擎原生排序（Bing/Google 给的先后）：越靠前略微加权
+      - 有摘要 +0.2；摘要越长（信息越完整）最多 +0.5
     返回的 score 越高代表越相关。
     """
+    q = (query or "").lower().strip()
+    if not q:
+        return 0.0
     tokens = _tokenize(query)
     if not tokens:
         return 0.0
     title = (result.get("title") or "").lower()
     snippet = (result.get("snippet") or "").lower()
-    ql = (query or "").lower()
+    url = (result.get("url") or "").lower()
 
     score = 0.0
-    matched = 0
-    if ql in title:
-        score += 5.0
-        matched += 1
-    if ql in snippet:
-        score += 1.0
+    # 整句命中（短语），按出现次数加权
+    score += 6.0 * title.count(q)
+    score += 2.0 * snippet.count(q)
+    # 分词命中，按出现次数加权
     for t in tokens:
-        if t in title:
-            score += 2.0
-            matched += 1
-        elif t in snippet:
-            score += 0.5
-            matched += 1
+        if not t:
+            continue
+        score += 3.0 * title.count(t)
+        score += 0.6 * snippet.count(t)
+        if t in url:
+            score += 1.5
     # 覆盖率：避免「只命中一个词却排很高」
-    score += (matched / len(tokens)) * 1.0
+    matched = sum(1 for t in tokens if (t in title or t in snippet or t in url))
+    score += (matched / len(tokens)) * 2.0
+    # 引擎原生排序：越靠前越相关（轻微信号，也用于同分排序）
+    pos = result.get("pos")
+    if isinstance(pos, int) and pos > 0:
+        score += max(0.0, 2.0 - 0.1 * (pos - 1))
+    # 有摘要 + 摘要更丰富
     if snippet:
-        score += 0.1
+        score += 0.2
+    score += min(0.5, len(snippet) / 2000.0)
     return round(score, 4)
 
 
@@ -225,14 +235,18 @@ def rank_results(results, query: str, sort: str = "relevance"):
     """
     给结果列表算分并排序。
 
-    sort="relevance" → 按 score 降序（最匹配在前），并写入 rank。
+    sort="relevance" → 按 score 降序（最匹配在前）；同分时按引擎原生顺序（pos 小者优先）。
     sort="engine"    → 保持搜索引擎原始顺序，rank 仍按原顺序编号。
-    返回新列表（不修改入参顺序以外的引用内容，但会就地补 score/rank）。
+    返回新列表，并就地补 score/rank。
     """
     for r in results:
         r["score"] = relevance_score(query, r)
     if sort == "relevance":
-        ordered = sorted(results, key=lambda r: r.get("score", 0.0), reverse=True)
+        ordered = sorted(
+            results,
+            key=lambda r: (r.get("score", 0.0), -(r.get("pos") or 9999)),
+            reverse=True,
+        )
     else:
         ordered = list(results)
     for i, r in enumerate(ordered, 1):
@@ -260,6 +274,25 @@ def _ddg_real_url(href: str) -> str:
     return ""
 
 
+def _resolve_redirect(url: str, timeout: int = 8) -> str:
+    """顺着 302 跳转拿最终真实 URL（百度/搜狗的结果链接都包了一层站内跳转）。
+    失败则返回原 url。HEAD 不行就退回 GET，都失败就原样返回。"""
+    if not url or not url.startswith("http"):
+        return url
+    headers = {"User-Agent": BROWSER_UA, "Accept": "*/*"}
+    try:
+        req = urllib.request.Request(url, headers=headers, method="HEAD")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.geturl()
+    except Exception:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.geturl()
+        except Exception:
+            return url
+
+
 def _build_ddg(query: str, page: int = 0) -> str:
     # DuckDuckGo HTML 版单页即返回约 30 条；翻页需 POST，这里单页足够
     return "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote_plus(query)
@@ -267,43 +300,60 @@ def _build_ddg(query: str, page: int = 0) -> str:
 
 def _build_bing(query: str, page: int = 0) -> str:
     first = 1 + 10 * page
-    return "https://www.bing.com/search?q=" + urllib.parse.quote_plus(query) + f"&first={first}"
+    # count=50：让 Bing 一页就返回最多 50 条，避免依赖翻页（翻页在部分网络下会被拦）
+    return ("https://www.bing.com/search?q=" + urllib.parse.quote_plus(query)
+            + f"&first={first}&count=50")
 
 
 def _build_google(query: str, page: int = 0) -> str:
     start = 10 * page
-    return "https://www.google.com/search?q=" + urllib.parse.quote_plus(query) + f"&hl=en&start={start}"
+    # num=30：让 Google 一页返回最多 30 条，同样减少翻页依赖
+    return ("https://www.google.com/search?q=" + urllib.parse.quote_plus(query)
+            + f"&hl=en&start={start}&num=30")
+
+
+def _build_baidu(query: str, page: int = 0) -> str:
+    pn = 10 * page
+    # rn=30：尽量一页拿 30 条；若被忽略则靠 pn 翻页凑（_collect 已处理）
+    return ("https://www.baidu.com/s?wd=" + urllib.parse.quote_plus(query)
+            + f"&rn=30&pn={pn}")
+
+
+def _build_sogou(query: str, page: int = 0) -> str:
+    # Sogou 的 page 是 1 基；默认每页约 10 条，多页靠 _collect 凑够 30
+    return ("https://www.sogou.com/web?query=" + urllib.parse.quote_plus(query)
+            + f"&page={page + 1}")
 
 
 def parse_ddg(root: Node):
     results = []
     links = root.find_all("a", "result__a")
     snippets = root.find_all(cls="result__snippet")
-    for i, link in enumerate(links):
+    for i, link in enumerate(links, 1):
         title = _clean(link.all_text())
         url = _ddg_real_url(link.href or "")
-        snippet = _clean(snippets[i].all_text()) if i < len(snippets) else ""
+        snippet = _clean(snippets[i - 1].all_text()) if i - 1 < len(snippets) else ""
         if url:
-            results.append({"title": title, "url": url, "snippet": snippet})
+            results.append({"title": title, "url": url, "snippet": snippet, "pos": i})
     return results
 
 
 def parse_bing(root: Node):
     results = []
-    for li in root.find_all("li", "b_algo"):
+    for i, li in enumerate(root.find_all("li", "b_algo"), 1):
         a = li.find("a")
         if not a or not a.href or not a.href.startswith("http"):
             continue
         title = _clean(a.all_text())
         p = li.find("p")
         snippet = _clean(p.all_text()) if p else ""
-        results.append({"title": title, "url": a.href, "snippet": snippet})
+        results.append({"title": title, "url": a.href, "snippet": snippet, "pos": i})
     return results
 
 
 def parse_google(root: Node):
     results = []
-    for block in root.find_all(cls="g"):
+    for i, block in enumerate(root.find_all(cls="g"), 1):
         h3 = block.find("h3")
         if not h3:
             continue
@@ -313,7 +363,75 @@ def parse_google(root: Node):
         title = _clean(h3.all_text())
         snip = block.find(cls="VwiC3b") or block.find(cls="IsZvec")
         snippet = _clean(snip.all_text()) if snip else ""
-        results.append({"title": title, "url": a.href, "snippet": snippet})
+        results.append({"title": title, "url": a.href, "snippet": snippet, "pos": i})
+    return results
+
+
+def parse_baidu(root: Node):
+    results = []
+    for i, div in enumerate(root.find_all(cls="c-container"), 1):
+        a = div.find("a")
+        if not a:
+            continue
+        title = _clean(a.all_text())
+        # 优先用容器上的 mu（Baidu 自带真实地址）；否则用 a.href 并尝试解跳
+        url = (div.attrs.get("mu") or a.href or "").strip()
+        if not url or not url.startswith("http"):
+            continue
+        if "baidu.com/link" in url:
+            url = _resolve_redirect(url) or url
+        # 摘要：优先 c-abstract，否则取容器文本去掉标题
+        sn = div.find(cls="c-abstract")
+        if sn:
+            snippet = _clean(sn.all_text())
+        else:
+            snippet = _clean(div.all_text())
+            if title and snippet.startswith(title):
+                snippet = snippet[len(title):].strip()
+        results.append({"title": title, "url": url, "snippet": snippet, "pos": i})
+    return results
+
+
+def parse_sogou(root: Node):
+    results = []
+    seen = set()
+    # Sogou 结果容器类名多变，优先 rb / vrwrap，否则退化到「所有指向 /link 的 a」
+    blocks = root.find_all(cls="rb") or root.find_all(cls="vrwrap")
+    if not blocks:
+        for i, a in enumerate(root.find_all("a"), 1):
+            href = a.href or ""
+            if "/link?url=" not in href:
+                continue
+            title = _clean(a.all_text())
+            if not title:
+                continue
+            url = href if href.startswith("http") else "https://www.sogou.com" + href
+            url = _resolve_redirect(url) or url
+            if not url.startswith("http") or url in seen:
+                continue
+            seen.add(url)
+            results.append({"title": title, "url": url, "snippet": "", "pos": i})
+        return results
+    for i, block in enumerate(blocks, 1):
+        a = block.find("a")
+        if not a or not a.href:
+            continue
+        title = _clean(a.all_text())
+        url = a.href.strip()
+        if url.startswith("/"):
+            url = "https://www.sogou.com" + url
+        if "sogou.com/link" in url:
+            url = _resolve_redirect(url) or url
+        if not url.startswith("http") or url in seen:
+            continue
+        seen.add(url)
+        sn = block.find(cls="text-layout") or block.find(cls="fz-mid")
+        snippet = _clean(sn.all_text()) if sn else ""
+        if not snippet:
+            snippet = _clean(block.all_text())
+            if title and snippet.startswith(title):
+                snippet = snippet[len(title):].strip()
+        results.append({"title": title, "url": url, "snippet": snippet, "pos": i})
     return results
 
 
@@ -335,6 +453,18 @@ ENGINES = {
         "build_url": _build_google,
         "parse": parse_google,
         "needs_js": True,  # 强反爬，真实浏览器收益最大
+    },
+    "baidu": {
+        "label": "百度",
+        "build_url": _build_baidu,
+        "parse": parse_baidu,
+        "needs_js": False,  # 服务端渲染，纯 HTTP 也能抓；结果用 mu 属性拿真实 URL
+    },
+    "sogou": {
+        "label": "搜狗",
+        "build_url": _build_sogou,
+        "parse": parse_sogou,
+        "needs_js": False,  # 服务端渲染；结果链接需顺 /link 跳转解析
     },
 }
 
