@@ -75,6 +75,33 @@ def test_build_url():
     # bing / google 也应正确编码
     assert "python" in bs._build_bing("python")
     assert "python" in bs._build_google("python")
+    # baidu / sogou：核心参数与编码都要对
+    bu = bs._build_baidu("天气")
+    assert "wd=" in bu and urllib.parse.quote_plus("天气") in bu and "rn=30" in bu
+    su = bs._build_sogou("天气")
+    assert "query=" in su and urllib.parse.quote_plus("天气") in su
+
+
+def test_parse_baidu():
+    # 百度结果容器用 mu 属性直接给真实 URL，无需跳转
+    html = ('<div class="c-container" mu="https://real.example.com/b1">'
+            '<a>百度结果一</a><div class="c-abstract">这是摘要</div></div>')
+    root = bs.parse_html(html)
+    results = bs.parse_baidu(root)
+    assert len(results) == 1
+    assert results[0]["title"] == "百度结果一"
+    assert results[0]["url"] == "https://real.example.com/b1"
+    assert results[0]["snippet"] == "这是摘要"
+
+
+def test_parse_sogou():
+    # 搜狗结果容器类名 rb；此处用直链（非 /link 跳转），解析不应触发网络
+    html = '<div class="rb"><a href="https://real.example.com/s1">搜狗结果一</a></div>'
+    root = bs.parse_html(html)
+    results = bs.parse_sogou(root)
+    assert len(results) == 1
+    assert results[0]["title"] == "搜狗结果一"
+    assert results[0]["url"] == "https://real.example.com/s1"
 
 
 def test_ddg_real_url():
