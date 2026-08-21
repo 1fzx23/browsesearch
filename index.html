@@ -115,6 +115,8 @@
           <option value="duckduckgo">DuckDuckGo</option>
           <option value="bing">Bing</option>
           <option value="google">Google</option>
+          <option value="baidu">百度</option>
+          <option value="sogou">搜狗</option>
         </select>
         <button class="btn primary" id="go">用浏览器打开搜索 ↗</button>
       </div>
@@ -174,11 +176,13 @@ curl -X POST http://127.0.0.1:8731/search \
   </section>
 
   <section id="engines">
-    <div class="sec-head"><h2>支持的搜索引擎</h2><span class="hint">// 3 engines</span></div>
+    <div class="sec-head"><h2>支持的搜索引擎</h2><span class="hint">// 5 engines</span></div>
     <div class="eng">
       <div class="e"><h4>🔦 DuckDuckGo <span class="tag">默认</span></h4><p>HTML 版服务端渲染，对无头浏览器最友好，几乎不需要 JS 兜底。</p></div>
-      <div class="e"><h4>🅱️ Bing</h4><p>结果结构清晰，真实浏览器渲染能稳定拿到标题/链接/摘要。</p></div>
+      <div class="e"><h4>🅱️ Bing</h4><p>结果结构清晰，真实浏览器渲染能稳定拿到标题/链接/摘要；纯 HTTP 也能抓。</p></div>
       <div class="e"><h4>🔍 Google</h4><p>反爬最严，真实 Chromium 渲染的加成最大；DOM 结构偶尔变动，解析为尽力而为。</p></div>
+      <div class="e"><h4>🐾 百度</h4><p>服务端渲染，纯 HTTP 即可抓取；结果用容器 <code>mu</code> 属性直接拿真实 URL，免跳转。</p></div>
+      <div class="e"><h4>🐶 搜狗</h4><p>服务端渲染；结果链接包一层站内 <code>/link</code> 跳转，已自动顺着 302 解析出真实 URL。</p></div>
     </div>
   </section>
 </div>
@@ -191,7 +195,9 @@ curl -X POST http://127.0.0.1:8731/search \
   const ENG = {
     duckduckgo: q => "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q),
     bing:       q => "https://www.bing.com/search?q=" + encodeURIComponent(q),
-    google:     q => "https://www.google.com/search?q=" + encodeURIComponent(q) + "&hl=zh-CN"
+    google:     q => "https://www.google.com/search?q=" + encodeURIComponent(q) + "&hl=zh-CN",
+    baidu:      q => "https://www.baidu.com/s?wd=" + encodeURIComponent(q),
+    sogou:      q => "https://www.sogou.com/web?query=" + encodeURIComponent(q)
   };
   const q = document.getElementById("q");
   const eng = document.getElementById("eng");
